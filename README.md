@@ -398,7 +398,7 @@ Avro Serializers will automatically push the schema into the registry. For the p
 ProducerRecord<String, Order> record = new ProducerRecord<>("OrderAvroTopic", order.getCustomerName().toString(), order);
 ```
 
-For the consumer, we use the following. Avro supports specific readers for specific types.
+For the consumer, we use the following.
 
 ```java
 		props.setProperty("bootstrap.servers", "localhost:9092");
@@ -409,4 +409,35 @@ For the consumer, we use the following. Avro supports specific readers for speci
 		props.setProperty("specific.avro.reader", "true");
 ```
 
-The schema will automatically be uploaded by the producer to `http://localhost:8081/schemas`
+The schema will automatically be uploaded by the producer to `http://localhost:8081/schemas`.
+
+### GenericRecord
+
+Avro supports specific readers for specific types, such as our Order type but avro also supports GenericRecord types. We just need to parse a schema and
+
+```java
+KafkaProducer<String, GenericRecord> producer = new KafkaProducer<>(props);
+		Parser parser = new Schema.Parser();
+		Schema schema = parser.parse(file);
+		GenericRecord order = new GenericData.Record(schema);
+		order.put("customerName", "doge");
+		order.put("product", "Macbook");
+		order.put("quantity", 100);
+
+		ProducerRecord<String, GenericRecord> record = new ProducerRecord<>("OrderAvroGRTopic",
+				order.get("customerName").toString(), order);
+
+
+		// create the consumer
+		KafkaConsumer<String, GenericRecord> consumer = new KafkaConsumer<>(props);
+		consumer.subscribe(Collections.singletonList("OrderAvroGRTopic"));
+
+		// poll the topic
+		ConsumerRecords<String, GenericRecord> records = consumer.poll(Duration.ofSeconds(20));
+
+		for (ConsumerRecord<String, GenericRecord> record : records) {
+			String customerName = record.key();
+			GenericRecord order = record.value();
+			System.out.println("Product: " +  order.get("product"));
+		}
+```
