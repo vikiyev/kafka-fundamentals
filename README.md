@@ -191,3 +191,97 @@ public class OrderConsumer {
 	}
 }
 ```
+
+## Custom Serializer and Deserializer
+
+Custom serializer and deserializers are needed when working with custom object types to convert these objects into byte array. We can use jackson-databind **ObjectMapper** to convert from/into string then into/from bytes.
+
+```java
+public class OrderSerializer implements Serializer<Order> {
+
+	@Override
+	public byte[] serialize(String topic, Order order) {
+		byte[] response = null;
+		// serialization logic
+		ObjectMapper objectMapper = new ObjectMapper();
+		try {
+			response = objectMapper.writeValueAsString(order).getBytes();
+		} catch (JsonProcessingException e) {
+			e.printStackTrace();
+		}
+		return response;
+	}
+}
+```
+
+```java
+public class OrderDeserializer implements Deserializer<Order> {
+	@Override
+	public Order deserialize(String topic, byte[] data) {
+		Order order = null;
+		ObjectMapper objectMapper = new ObjectMapper();
+		try {
+			order = objectMapper.readValue(data, Order.class);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return order;
+	}
+}
+```
+
+```java
+public class OrderProducer {
+	public static void main(String[] args) {
+		// create properties
+		Properties props = new Properties();
+		props.setProperty("bootstrap.servers", "localhost:9092");
+		props.setProperty("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+		props.setProperty("value.serializer", "com.demiglace.kafka.orderproducer.customserializers.OrderSerializer");
+
+		// create the producer
+		KafkaProducer<String,Order> producer = new KafkaProducer<String, Order>(props);
+		Order order = new Order();
+		order.setCustomerName("Doge");
+		order.setProduct("Macbook");
+		order.setQuantity(10);
+		ProducerRecord<String, Order> record = new ProducerRecord<>("OrderCSTopic", order.getCustomerName(), order);
+
+		try {
+			// send message
+			producer.send(record); // synchronous
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			producer.close();
+		}
+	}
+}
+```
+
+```java
+public class OrderConsumer {
+	public static void main(String[] args) {
+		Properties props = new Properties();
+		props.setProperty("bootstrap.servers", "localhost:9092");
+		props.setProperty("key.deserializer", StringDeserializer.class.getName());
+		props.setProperty("value.deserializer", OrderDeserializer.class.getName());
+		props.setProperty("group.id", "OrderTopic");
+
+		// create the consumer
+		KafkaConsumer<String, Order> consumer = new KafkaConsumer<>(props);
+		consumer.subscribe(Collections.singletonList("OrderCSTopic"));
+
+		// poll the topic
+		ConsumerRecords<String, Order> records = consumer.poll(Duration.ofSeconds(20));
+
+		for (ConsumerRecord<String, Order> record : records) {
+			String customerName = record.key();
+			Order order = record.value();
+			System.out.println("Product: " +  order.getProduct());
+		}
+
+		consumer.close();
+	}
+}
+```
