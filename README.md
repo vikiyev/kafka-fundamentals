@@ -106,3 +106,88 @@ A set of consumers working together to consume a topic. It ensures that each par
 ### Batching
 
 A batch is a collection of messages that should be written to the same topic and partition. Kafka producers batches messages based on the topic and partition.
+
+## Kafka Producer API
+
+To create a Producer, we create an instance of the **KafkaProducer** class which takes a key value and properties on the constructor. The **bootstrap.servers** property is a list of brokers the producer should connect to. The **key.serializer** and **value.serializer** are classes for converting java objects into bytes so that the kafka broker can understand it.
+
+The Record object will represent the message with the key, value and the topic it should be sent to. The send method is returns a Future<RecordMetadata> which we can wait for on a synchronous send.
+
+```java
+public class OrderProducer {
+	public static void main(String[] args) {
+		// create properties
+		Properties props = new Properties();
+		props.setProperty("bootstrap.servers", "localhost:9092");
+		props.setProperty("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+		props.setProperty("value.serializer", "org.apache.kafka.common.serialization.IntegerSerializer");
+
+		// create the producer
+		KafkaProducer<String,Integer> producer = new KafkaProducer<String, Integer>(props);
+		ProducerRecord<String, Integer> record = new ProducerRecord<>("OrderTopic", "Macbook Pro", 10);
+
+		try {
+			// send message
+			Future<RecordMetadata> future = producer.send(record);
+			RecordMetadata recordMetadata = future.get();
+			System.out.println("Message sent!");
+			System.out.println(recordMetadata.partition());
+			System.out.println(recordMetadata.offset());
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			producer.close();
+		}
+	}
+}
+```
+
+If we want to send a message asynchronously, we need to add a callback parameter to the send() method that implements the Callback interface.
+
+```java
+		try {
+			producer.send(record, new OrderCallback()); // async send
+		}
+```
+
+```java
+public class OrderCallback implements Callback {
+	@Override
+	public void onCompletion(RecordMetadata recordMetadata, Exception exception) {
+		System.out.println("Message sent!");
+		System.out.println(recordMetadata.partition());
+		System.out.println(recordMetadata.offset());
+	}
+}
+```
+
+## Kafka Consumer API
+
+To create a consumer, we pass the properties to **KafkaConsumer**. The consumer needs the **group.id** property in addition to key.deserializer, value.deserializer and bootstrap.servers. A consumer can subscribe to multiple topics. Once subscribed, we need to invoke the **poll()** method to start polling the topic for messages.
+
+```java
+public class OrderConsumer {
+
+	public static void main(String[] args) {
+		Properties props = new Properties();
+		props.setProperty("bootstrap.servers", "localhost:9092");
+		props.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+		props.setProperty("value.deserializer", "org.apache.kafka.common.serialization.IntegerDeserializer");
+		props.setProperty("group.id", "OrderTopic");
+
+		// create the consumer
+		KafkaConsumer<String, Integer> consumer = new KafkaConsumer<>(props);
+		consumer.subscribe(Collections.singletonList("OrderTopic"));
+
+		// poll the topic
+		ConsumerRecords<String, Integer> orders= consumer.poll(Duration.ofSeconds(20));
+
+		for (ConsumerRecord<String, Integer> order : orders) {
+			System.out.println("Product Name: " + order.key());
+			System.out.println("Product Quantity: " + order.value());
+		}
+
+		consumer.close();
+	}
+}
+```
