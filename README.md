@@ -31,6 +31,29 @@ kafka-console-producer --broker-list localhost:9092 --topic first-topic
 > Hello World!
 ```
 
+## Running Confluent Platform
+
+https://docs.confluent.io/platform/current/platform-quickstart.html#step-1-download-and-start-cp
+
+1. Create a docker-compose.yml from the [repo](https://github.com/confluentinc/cp-all-in-one/tree/7.3.1-post/cp-all-in-one/docker-compose.yml).
+2. Start the Confluent Platform stack
+
+```bash
+docker-compose up -d
+```
+
+3. Verify that the services are up and running:
+
+```bash
+docker-compose ps
+```
+
+To restart the containers:
+
+```bash
+docker-compose restart name
+```
+
 ## Concepts
 
 ### Event Streaming
@@ -285,3 +308,105 @@ public class OrderConsumer {
 	}
 }
 ```
+
+## Avro
+
+Apache Avro is a framework that can serialize and deserialize objects out of the box, we just need to define a JSON schema. We can also use this schema to generate a java class. Each record that is produces will comply to the schema. As different consumers might need different versions of a schema, we can use Schema registries such as Confluent's schema registry at port 8081.
+
+An Avro (.avsc) schema uses JSON syntax. The **namespace** will be used for the package name and the **name** for the class name. The Order POJO will be created by the avro-maven-plugin from this schema, which will include annotations from avro.
+
+```json
+{
+  "namespace": "com.demiglace.kafka.avro",
+  "type": "record",
+  "name": "Order",
+  "fields": [
+    {
+      "name": "customerName",
+      "type": "string"
+    },
+    {
+      "name": "product",
+      "type": "string"
+    },
+    {
+      "name": "quantity",
+      "type": "int"
+    }
+  ]
+}
+```
+
+To use avro, we need the following plugins. The Order class will be generated after doing a maven generate-sources
+
+```xml
+<repositories>
+	<repository>
+		<id>confluent</id>
+		<url>http://packages.confluent.io/maven/</url>
+		<releases>
+			<enabled>true</enabled>
+		</releases>
+		<snapshots>
+			<enabled>true</enabled>
+		</snapshots>
+	</repository>
+</repositories>
+
+<dependency>
+	<groupId>org.apache.avro</groupId>
+	<artifactId>avro</artifactId>
+	<version>1.10.2</version>
+</dependency>
+<dependency>
+	<groupId>io.confluent</groupId>
+	<artifactId>kafka-avro-serializer</artifactId>
+	<version>6.2.0</version>
+</dependency>
+
+<build>
+	<plugins>
+		<plugin>
+			<groupId>org.apache.avro</groupId>
+			<artifactId>avro-maven-plugin</artifactId>
+			<version>1.10.2</version>
+			<executions>
+				<execution>
+					<phase>generate-sources</phase>
+					<goals>
+						<goal>schema</goal>
+					</goals>
+					<configuration>
+						<sourceDirectory>${project.basedir}/src/main/resources/</sourceDirectory>
+						<outputDirectory>${project.basedir}/src/main/java</outputDirectory>
+					</configuration>
+				</execution>
+			</executions>
+		</plugin>
+	</plugins>
+</build>
+```
+
+Avro Serializers will automatically push the schema into the registry. For the producer properties, we use the following
+
+```java
+		props.setProperty("bootstrap.servers", "localhost:9092");
+		props.setProperty("key.serializer", KafkaAvroSerializer.class.getName());
+		props.setProperty("value.serializer", KafkaAvroSerializer.class.getName());
+		props.setProperty("schema.registry.url", "http://localhost:8081");
+
+ProducerRecord<String, Order> record = new ProducerRecord<>("OrderAvroTopic", order.getCustomerName().toString(), order);
+```
+
+For the consumer, we use the following. Avro supports specific readers for specific types.
+
+```java
+		props.setProperty("bootstrap.servers", "localhost:9092");
+		props.setProperty("key.deserializer", KafkaAvroDeserializer.class.getName());
+		props.setProperty("value.deserializer", KafkaAvroDeserializer.class.getName());
+		props.setProperty("group.id", "OrderGroup");
+		props.setProperty("schema.registry.url", "http://localhost:8081");
+		props.setProperty("specific.avro.reader", "true");
+```
+
+The schema will automatically be uploaded by the producer to `http://localhost:8081/schemas`
