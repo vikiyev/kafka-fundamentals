@@ -524,3 +524,60 @@ The time for a producer to wait before handing over a message to the sender thre
 ### REQUEST_TIMEOUT_MS_CONFIG
 
 Time in milliseconds for a producer to wait for a response from the broker
+
+## Message Delivery
+
+Kafka supports three message delivery semantics:
+
+1. At Least Once
+2. At Most Once
+3. Only Once/Idempotency
+
+### At Least Once
+
+Default option. If the emssage is received by the broker and once the partitions (leader and follower) have received the message, the broker treats it as committed and sends an acknowledgement back to the producer. The disadvantage is that if the acknowledgement fails, the producer API will resend the same message.
+
+### At Most Once
+
+A message should be delivered at most once. The producer will not retry sending a message. This is achieved by setting retries to 0.
+
+### Only Once
+
+No duplication of messages by setting enable.idempotence to true. The producer send method generates a unique sequence number for every message that is unique for every partition. The broker maintains the message sequence number and produces a unique producer ID for each producer instance.
+
+```java
+props.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+```
+
+## Transactions
+
+A transaction is where we commit all records or roll back everything when an exception occurs. By setting TRANSACTIONAL_ID_CONFIG, every producer instance should have a unique id. The KafkaProducer **initTransactions()** method ensures that any transactions initiated by previous isntances of the producer with the same transactional.id are completed. If the previous instance has failed, it will abort. If the last transaction is not yet finished, this will await its completion. We need to set the max.block.ms property as well to prevent blocking.
+
+It is important to note that when using transactions, we don't need to pass a callback to the send() method. Producers are thread safe, meaning we can invoke the send() method from multiple threads but the same producer instance cannot have multiple transactions open at the same time. The commitTransaction() method will flush any unsent record before the commit happens.
+
+```java
+public class TransactionalOrderProducer {
+	public static void main(String[] args) {
+		props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "order-produicer-1");
+		// props.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, "1000");
+
+		// create the producer
+		KafkaProducer<String,Integer> producer = new KafkaProducer<String, Integer>(props);
+		producer.initTransactions();
+		ProducerRecord<String, Integer> record = new ProducerRecord<>("OrderTopic", "Macbook Pro", 10);
+		ProducerRecord<String, Integer> record2 = new ProducerRecord<>("OrderTopic", "Legion", 20);
+
+		try {
+			producer.beginTransaction();
+			producer.send(record);
+			producer.send(record2);
+			producer.commitTransaction();
+		} catch (Exception e) {
+			producer.abortTransaction();
+			e.printStackTrace();
+		} finally {
+			producer.close();
+		}
+	}
+}
+```
