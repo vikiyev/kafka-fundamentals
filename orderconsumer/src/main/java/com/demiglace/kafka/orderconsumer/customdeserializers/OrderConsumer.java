@@ -19,7 +19,7 @@ public class OrderConsumer {
 
 		// create the consumer
 		KafkaConsumer<String, Order> consumer = new KafkaConsumer<>(props);
-		consumer.subscribe(Collections.singletonList("OrderCSTopic"));
+		consumer.subscribe(Collections.singletonList("OrderPartitionedTopic"));
 
 		// poll the topic
 		try {
@@ -30,6 +30,7 @@ public class OrderConsumer {
 					String customerName = record.key();
 					Order order = record.value();
 					System.out.println("Product: " + order.getProduct());
+					System.out.println("Partition: " + record.partition());
 				}
 			}
 		} finally {

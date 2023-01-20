@@ -7,6 +7,8 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
+import com.demiglace.kafka.orderproducer.customserializers.partitioners.VIPPartitioner;
+
 public class OrderProducer {
 	public static void main(String[] args) {
 		// create properties
@@ -14,6 +16,7 @@ public class OrderProducer {
 		props.setProperty("bootstrap.servers", "localhost:9092");
 		props.setProperty("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
 		props.setProperty("value.serializer", "com.demiglace.kafka.orderproducer.customserializers.OrderSerializer");
+		props.setProperty("partitioner.class", VIPPartitioner.class.getName());
 		
 		// create the producer
 		KafkaProducer<String,Order> producer = new KafkaProducer<String, Order>(props);
@@ -21,7 +24,7 @@ public class OrderProducer {
 		order.setCustomerName("Doge");
 		order.setProduct("Macbook");
 		order.setQuantity(10);
-		ProducerRecord<String, Order> record = new ProducerRecord<>("OrderCSTopic", order.getCustomerName(), order);
+		ProducerRecord<String, Order> record = new ProducerRecord<>("OrderPartitionedTopic", order.getCustomerName(), order);
 		
 		try {
 			// send message

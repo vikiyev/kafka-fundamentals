@@ -441,3 +441,86 @@ KafkaProducer<String, GenericRecord> producer = new KafkaProducer<>(props);
 			System.out.println("Product: " +  order.get("product"));
 		}
 ```
+
+## Creating Custom Partitioner
+
+We start by manually creating a topic with 10 partitions using the broker node.
+
+```bash
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 10 --topic OrderPart
+itionedTopic
+kafka-topics --describe --bootstrap-server localhost:9092 --topic OrderPartitionedTopic
+```
+
+The custom partitioner class implements **Partitioner** from kafka. The partitioning logic uses a murmur2 algorithm. In the following example, A "Doge" key will be put into partition 5. Otherwise, it will be returned based on the murmur hashing algorithm.
+
+```java
+public class VIPPartitioner implements Partitioner {
+	@Override
+	public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
+		List<PartitionInfo> partitions = cluster.availablePartitionsForTopic(topic);
+		// logic for implementing partitioning
+		if (((String)key).equals("Doge")) {
+			return 5;
+		}
+		return (Math.abs(Utils.murmur2(keyBytes))%partitions.size() - 1 );
+	}
+}
+```
+
+We can then set the partitioner.class property on the producer.
+
+```java
+props.setProperty("partitioner.class", VIPPartitioner.class.getName());
+```
+
+## ProducerConfig
+
+Instead of hardcoding the properties, we can use the kafka ProducerConfig class.
+
+```java
+		Properties props = new Properties();
+		props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+		props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+		props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.IntegerSerializer");
+		props.setProperty(ProducerConfig.ACKS_CONFIG, "all");
+		props.setProperty(ProducerConfig.BUFFER_MEMORY_CONFIG, "123123");
+		props.setProperty(ProducerConfig.COMPRESSION_TYPE_CONFIG, "gzip");
+		props.setProperty(ProducerConfig.RETRIES_CONFIG, "2");
+		props.setProperty(ProducerConfig.RETRY_BACKOFF_MS_CONFIG, "500");
+		props.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, "1000000");
+		props.setProperty(ProducerConfig.LINGER_MS_CONFIG, "500");
+		props.setProperty(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "200");
+```
+
+### ACKS_CONFIG
+
+The ACKS*CONFIG property can have either \_0*, _1_ or _all_ as its value. This controls how many partitions should receive a message before the producer considers a successful send.
+
+### BUFFER_MEMORY_CONFIG
+
+A byte value which the producer will use to buffer the messages before it sends to the broker. By default, it is 256 Mb.
+
+### COMPRESSION_TYPE_CONFIG
+
+By default, sent messages are not compressed. The possible values are _snappy_, _gzip_, _lz4_.
+
+### RETRIES_CONFIG
+
+The amount of times to retry sending a message. If set to 0, it will never retry. The producer will not retry if there is an unrecoverable exception.
+
+### RETRY_BACKOFF_MS_CONFIG
+
+The duration between retries. By default, it waits for 100ms before retrying sending.
+
+### BATCH_SIZE_CONFIG
+
+Memory size to be allocated to a batch in bytes. Defaults to 16kb. By default, the producer doesn't wait for the batch memory to be filled with messages and will hand over the message as soon as a sender thread is available.
+
+### LINGER_MS_CONFIG
+
+The time for a producer to wait before handing over a message to the sender thread.
+
+### REQUEST_TIMEOUT_MS_CONFIG
+
+Time in milliseconds for a producer to wait for a response from the broker
