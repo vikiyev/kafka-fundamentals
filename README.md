@@ -54,6 +54,94 @@ To restart the containers:
 docker-compose restart name
 ```
 
+## Spring Kafka
+
+An abstraction on top of the kafka-clients library and makes creating producers and consumers easily. The necessary dependencies for the sample project are Spring Web and Spring for Apache Kafka. Spring supports inbuilt JSON serializer that we can use on our custom User object.
+
+```java
+public class User {
+	private String name;
+	private int age;
+	private String favGenre;
+}
+```
+
+### Producer App
+
+```properties
+
+spring.kafka.producer.bootstrap-servers=localhost:9092
+spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
+spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer
+```
+
+```java
+@Service
+public class UserProducerService {
+
+	@Autowired
+	private KafkaTemplate<String, User> kafkaTemplate;
+
+	public void sendUserData(User user) {
+		kafkaTemplate.send("user-topic", user.getName(), user);
+	}
+}
+```
+
+The rest controller will be as follows
+
+```java
+@RestController
+@RequestMapping("/userapi")
+public class UserController {
+	@Autowired
+	private UserProducerService service;
+
+	@PostMapping("/publishuserdata")
+	public void sendUserData(@RequestBody User user) {
+		service.sendUserData(user);
+	}
+}
+```
+
+### Consumer App
+
+```properties
+spring.kafka.consumer.bootstrap-servers=localhost:9092
+spring.kafka.consumer.key-deserializer=org.apache.kafka.common.serialization.StringDeserializer
+spring.kafka.consumer.value-deserializer=org.springframework.kafka.support.serializer.JsonDeserializer
+spring.kafka.consumer.properties.spring.json.trusted.packages=com.demiglace.kafka.dto
+spring.kafka.consumer.group-id=user-group
+server.port=8085
+```
+
+```java
+@Service
+public class UserConsumerService {
+	@KafkaListener(topics= {"user-topic"})
+	public void consumeUserData(User user) {
+		System.out.println("Received person age: " + user.getAge());
+		System.out.println("Favorite genre: " + user.getFavGenre());
+	}
+}
+```
+
+### Testing
+
+To test the app, send a POST request with a JSON body to `http://localhost:8080/userapi/publishuserdata`.
+
+```json
+{
+  "name": "Doge",
+  "age": 23,
+  "favGenre": "Supernatural"
+}
+```
+
+### Using a Custom Object Type
+
+We can create a User POJO
+
 ## Concepts
 
 ### Event Streaming
@@ -709,4 +797,152 @@ props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
 		// poll the topic
 		ConsumerRecords<String, Integer> orders= consumer.poll(Duration.ofSeconds(20));
+```
+
+## Real Time Stream Processing
+
+In big data systems, the data are stored in Data Lakes to be pulled and used by tools for near-real time processing. Data Streaming on the other hand is a continuous flow of data as the data stream doesn't get stored into data lakes/databases. As the stream is processed aggregation, analytics, etc can be performed in real time.
+
+The Kafka Streams Library is divided into two:
+
+1. Streams DSL (Domain Specific Language)
+2. Processor API
+
+In this section, the use case will be a data streaming application where data will flow as a stream from an input topic, get transformed and flow out into an output topic.
+
+Steps to create a streaming application:
+
+1. Configure Properties
+2. Define topology
+3. Start the Stream
+
+### Setting up the Project
+
+```bash
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic streams-dataflow-input
+
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic streams-dataflow-output
+```
+
+The project will use maven-archetype-quickstart with the kafka-streams dependency which transitively pulls kafka-clients as well.
+
+### Configuring Properties
+
+Every streaming application should have a unique id.
+
+```java
+		Properties props = new Properties();
+		props.put(StreamsConfig.APPLICATION_ID_CONFIG, "streams-dataflow");
+		props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+		props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
+		props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
+```
+
+### Creating Topology
+
+The stream topology is where the computational logic resides. We pass a lambda expression to the Stream.foreach() method.
+
+```java
+		StreamsBuilder builder = new StreamsBuilder();
+		KStream<String, String> stream = builder.stream("streams-dataflow-input");
+    // computational logic
+		stream.foreach((key,value) -> System.out.println("key " + key + " value " + value));
+		Topology topology = builder.build();
+    System.out.println(topology.describe());
+```
+
+We can see a description of the topology using **Topology.describe()**
+
+```bash
+Topologies:
+   Sub-topology: 0
+    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-dataflow-input])
+      --> KSTREAM-FOREACH-0000000001
+    Processor: KSTREAM-FOREACH-0000000001 (stores: [])
+      --> none
+      <-- KSTREAM-SOURCE-0000000000
+```
+
+### Starting and Closing Stream
+
+```java
+		// starting the stream
+		KafkaStreams streams = new KafkaStreams(topology, props);
+		streams.start();
+
+		// stopping the stream through the current runtime
+		Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
+```
+
+### Testing
+
+The kafka-console-producer command will produce a message on to the streams-dataflow-input topic
+
+```bash
+kafka-console-producer --bootstrap-server localhost:9092 --topic streams-dataflow-input
+```
+
+### Writing to Output Topic
+
+```java
+    stream.foreach((key,value) -> System.out.println("key " + key + " value " + value));
+		KStream<String,String> filteredStream = stream.filter((key,value) -> value.contains("token"));
+		filteredStream.to("streams-dataflow-output");
+```
+
+Some KStream methods returns a value. This way, we can chain stream methods.
+
+```java
+		stream.foreach((key, value) -> System.out.println("key " + key + " value " + value));
+		stream.filter((key, value) -> value.contains("token"))
+			.mapValues(value->value.toUpperCase())
+			.to("streams-dataflow-output");
+```
+
+## WordCount Usecase
+
+```bash
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic streams-wordcount-input
+
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic streams-wordcount-output
+```
+
+```java
+		// computational logic
+		// take incoming message and convert each word into key (null) value (word) pairs
+		// group by value, new stream will have the value as the new key
+		KGroupedStream<String,String> kGroupedStream = stream.flatMapValues(value->Arrays.asList(value.toLowerCase().split(" ")))
+			.groupBy((key, value) -> value);
+		KTable<String,Long> countsTable = kGroupedStream.count();
+		countsTable.toStream()
+		// override the default string to LONG
+			.to("streams-wordcount-output", Produced.with(Serdes.String(), Serdes.Long()));
+```
+
+### KTable
+
+A stateful component which represents of an update stream (changelog). As the records flow through the stream, it maintains the updates for the records with the same key. When the next identical message arrives, we increment the values from the earlier through an upsert operation.
+
+### flatMap
+
+Can return multiple records back as opposed to Map.
+
+### Testing
+
+To test, we run the following on the producer terminal
+
+```bash
+kafka-console-producer --bootstrap-server localhost:9092 --topic streams-wordcount-input
+```
+
+and the consumer terminal
+
+```bash
+kafka-console-consumer --bootstrap-server localhost:9092 \
+    --topic streams-wordcount-output \
+    --from-beginning \
+    --property print.key=true \
+    --property print.value=true \
+    --property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
+    --property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
 ```
