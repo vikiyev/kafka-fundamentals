@@ -686,3 +686,27 @@ Used by the broker for logging metrics
 ### MAX_POLL_RECORDS_CONFIG
 
 Maximum number of records the poll() method can return.
+
+## Simple Consumer
+
+A Simple Consumer is a standalone consumer that does not belong to a consumer group. This does not have rebalancing, etc. We can use the KafkaConsumer.assign() method to assign a consumer to a list of partitions
+
+```java
+props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+
+		// create the consumer
+		KafkaConsumer<String, Integer> consumer = new KafkaConsumer<>(props);
+		// assign all partitions from a given topic
+		List<PartitionInfo> partitionInfos = consumer.partitionsFor("SimpleConsumerTopic");
+		ArrayList<TopicPartition> partitions = new ArrayList<>();
+		// partitions.add(new TopicPartition("SimpleConsumerTopic", 0)); // assign to specific partitions
+		// partitions.add(new TopicPartition("SimpleConsumerTopic", 1)); // assign to specific partitions
+
+		for (PartitionInfo info : partitionInfos) {
+			partitions.add(new TopicPartition("SimpleConsumerTopic", info.partition()));
+		}
+		consumer.assign(partitions);
+
+		// poll the topic
+		ConsumerRecords<String, Integer> orders= consumer.poll(Duration.ofSeconds(20));
+```
