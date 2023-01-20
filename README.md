@@ -581,3 +581,108 @@ public class TransactionalOrderProducer {
 	}
 }
 ```
+
+## Consuemr Groups
+
+A consumer group is a group of consumers that can read from the same topic, but different partitions in a topic. If there are more consumers than partitions, some consumers will be left in an idle state. Using consumer groups, we can have multiple applications consume from the same topic.
+
+### Rebalancing
+
+Consumer Group Rebalancing is the process of moving partition ownership from one consumer to another in the group. This provides high availability, however, when a rebalance occurs, all the consumers in the group will go silent while the rebalance is happening. The group leader is the one that does the rebalancing whereas the consumer sends a heartbeat to the group leader.
+
+### Offset Commits
+
+Kafka doesn't keep track of which offset a consumer has reached or how many has already been processed. Offset Commits can be used so that the consumers can commit the offsets already processed into the **\_\_consumer_offsets** topic so that when a rebalance occurs, the new consumer assigned to the partition will know which offsets have been processed.
+
+### Auto Commit
+
+By default, auto commits are enabled. We can disable it with the "enable.auto.commit" property. The default interval for an auto commit to happen is 5s. When the poll() method is invoked for the very first time, it sets a timer for the auto commit and the next time the poll() is invoked, the poll will check if the 5s has elapsed and only then it will commit the previous offset. If not, it will process the next set of offset. We can set the interval using the auto.commit.interval.ms property.
+
+We can use the **ConsumerRecords.commitSync()** to manually commit the entire current offset. However, this blocks the consumer application until the broker responds back to the commit request. Using **commitAsync()**, the current offset will be sent to the broker and the next offset will be retrieved while the commit is still in progress. This however doesn't support retries if the commit fails. We can pass a **OffsetCommitCallback()** which invokes a method when a commit finishes.
+
+### Custom Commit Offset
+
+```java
+				int count = 0;
+
+				for (ConsumerRecord<String, Order> record : records) {
+					// business logic here
+
+					// commit every 10 records
+					if (count % 10 == 0) {
+						consumer.commitAsync(
+								Collections.singletonMap(new TopicPartition(record.topic(), record.partition()),
+										new OffsetAndMetadata(record.offset() + 1)),
+								new OffsetCommitCallback() {
+
+									@Override
+									public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets,
+											Exception exception) {
+										if (exception != null) {
+											System.out.println("Commit failed for offset: " + offsets);
+										}
+									}
+								});
+					}
+					count++;
+				}
+```
+
+### Rebalance Listeners
+
+We can pass a ConsumerRebalanceListener on our **KafkaConsumer.subscribe()** method to perform methods when a rebalance is triggered. **onPartitionsRevoked()** is triggered before the partitions are revoked. This is the place to commit offsets and cleanup the consumer before partitions are lost.
+
+```java
+consumer.subscribe(Collections.singletonList("OrderPartitionedTopic"), new RebalanceHandler());
+```
+
+```java
+		class RebalanceHandler implements ConsumerRebalanceListener {
+
+			@Override
+			public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+				consumer.commitSync(currentOffsets);
+			}
+
+			@Override
+			public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+				// TODO Auto-generated method stub
+
+			}
+
+		}
+```
+
+## ConsuemrConfig
+
+### FETCH_MIN_BYTES_CONFIG
+
+Tells the kafka broker to wait until the threshold is reached before sending data to the consumer. It defaults at 1MB.
+
+### FETCH_MAX_WAIT_MS_CONFIG
+
+Defaults to 500ms, which is the time the Kafka broker waits before sending data.
+
+### HEARTBEAT_INTERVAL_MS_CONFIG
+
+The interval for the consumer to send a heartbeat to the coordinator.
+
+### SESSION_TIMEOUT_MS_CONFIG
+
+Tells the broker for how long a consumer can run without sending a heartbeat. Usually set to 3x the heartbeat interval.
+
+### MAX_PARTITION_FETCH_BYTES_CONFIG
+
+Maximum number of bytes of data per partition the broker returns to the consumer.
+
+### AUTO_OFFSET_RESET_CONFIG
+
+Defines the consumer behavior if it starts reading a partition thatdoesn't have a committed offset. If set to latest, the consumer will start reading the latest records and ignore the previous records. earliest is where the consumer processes all the records from the beginning of the partition.
+
+### CLIENT_ID_CONFIG
+
+Used by the broker for logging metrics
+
+### MAX_POLL_RECORDS_CONFIG
+
+Maximum number of records the poll() method can return.
